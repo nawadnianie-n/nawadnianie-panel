@@ -43,25 +43,29 @@
   #log { font-size: 13px; color: var(--muted); min-height: 1.4em; }
   .hidden { display: none; }
   .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 10px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Nawadnianie</h1>
 
-  <section class="card" id="login">
-    <label for="host">Adres brokera (bez https://)</label>
-    <input id="host" autocomplete="off" placeholder="np. abcd1234.ala.eu-central-1.emqxsl.com">
-    <label for="port">Port WebSocket (TLS)</label>
-    <input id="port" inputmode="numeric" placeholder="port z przeglądu wdrożenia">
+  <form class="card" id="login" autocomplete="on">
+    <details id="adv">
+      <summary>Adres brokera</summary>
+      <label for="host">Adres brokera (bez https://)</label>
+      <input id="host" autocomplete="off" placeholder="np. abcd1234.ala.eu-central-1.emqxsl.com">
+      <label for="port">Port WebSocket (TLS)</label>
+      <input id="port" inputmode="numeric" placeholder="port z przeglądu wdrożenia">
+    </details>
     <label for="user">Użytkownik</label>
     <input id="user" autocomplete="username" placeholder="web">
     <label for="pass">Hasło</label>
     <input id="pass" type="password" autocomplete="current-password">
-    <div class="row" style="margin-top:14px"><button class="primary" id="connect">Połącz</button></div>
-    <p class="note">Hasło nie jest zapisywane. Adres, port i login zapamiętuje tylko ta przeglądarka.</p>
+    <div class="row" style="margin-top:14px"><button class="primary" id="connect" type="submit">Połącz</button></div>
+    <p class="note">Strona nie zapisuje hasła. Jeśli chcesz je zapamiętać, zrobi to menedżer haseł przeglądarki.</p>
     <div id="loginmsg" class="note"></div>
-  </section>
+  </form>
 
   <section class="card hidden" id="panel">
     <div class="badges">
@@ -105,11 +109,16 @@ let deviceOnline = false;
 let lastStatusAt = 0;
 let pingSentAt = 0;
 
-try {
-  $("host").value = localStorage.getItem("host") || "";
-  $("port").value = localStorage.getItem("port") || "";
-  $("user").value = localStorage.getItem("user") || "web";
-} catch (e) { /* localStorage może być niedostępne */ }
+// Wpisz tu dane swojego brokera. Adres i port NIE są tajne (tajne jest hasło, którego tu nie wpisuj).
+const DEFAULT_HOST = "d18f6aa1.ala.eu-central-1.emqxsl.com";   // np. "abcd1234.ala.eu-central-1.emqxsl.com" (bez https://)
+const DEFAULT_PORT = "8084";   // port WebSocket (TLS) z przeglądu wdrożenia
+const DEFAULT_USER = "web";
+
+$("host").value = DEFAULT_HOST;
+$("port").value = DEFAULT_PORT;
+$("user").value = DEFAULT_USER;
+// Gdy adres lub port nie są wpisane na stałe, pokaż pola do ręcznego wpisania.
+if (!DEFAULT_HOST || !DEFAULT_PORT) { $("adv").open = true; }
 
 function setBadge(el, text, cls) {
   el.textContent = text;
@@ -143,10 +152,6 @@ function connect() {
   const user = $("user").value.trim();
   const pass = $("pass").value;
   if (!host || !port || !user || !pass) { $("loginmsg").textContent = "Uzupełnij wszystkie pola."; return; }
-  try {
-    localStorage.setItem("host", host); localStorage.setItem("port", port); localStorage.setItem("user", user);
-  } catch (e) {}
-
   $("loginmsg").textContent = "Łączenie…";
   client = mqtt.connect("wss://" + host + ":" + port + "/mqtt", {
     username: user,
@@ -190,7 +195,7 @@ function connect() {
   });
 }
 
-$("connect").onclick = connect;
+$("login").addEventListener("submit", (e) => { e.preventDefault(); connect(); });
 $("on").onclick = () => send("PUMP ON");
 $("off").onclick = () => send("PUMP OFF");
 $("status").onclick = () => send("STATUS");
