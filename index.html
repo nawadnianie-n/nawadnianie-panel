@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nawadnianie</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1b2430; --muted: #667085; --line: #e1e6ed;
+    --accent: #1a7f5a; --accent-text: #ffffff; --danger: #c0392b; --warn: #b7791f; --bar: #dfe6ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151b; --card: #1a2029; --text: #e8edf3; --muted: #9aa7b6; --line: #2b3541;
+      --accent: #3ecf8e; --accent-text: #08130e; --danger: #ff6b5b; --warn: #f0b84a; --bar: #2b3541;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 520px; margin: 0 auto; display: grid; gap: 14px; }
+  h1 { font-size: 20px; margin: 4px 0 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--line);
+          background: var(--bg); color: var(--text); font-size: 15px; }
+  button { padding: 11px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card);
+           color: var(--text); font-size: 15px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .badge { font-size: 13px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.ok { color: var(--accent); border-color: var(--accent); }
+  .badge.bad { color: var(--danger); border-color: var(--danger); }
+  .big { font-size: 56px; font-weight: 600; line-height: 1; margin: 6px 0 10px; }
+  .bar { height: 12px; background: var(--bar); border-radius: 99px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+  .kv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .kv:last-child { border-bottom: 0; }
+  .kv span:first-child { color: var(--muted); }
+  #log { font-size: 13px; color: var(--muted); min-height: 1.4em; }
+  .hidden { display: none; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Nawadnianie</h1>
+
+  <section class="card" id="login">
+    <label for="host">Adres brokera (bez https://)</label>
+    <input id="host" autocomplete="off" placeholder="np. abcd1234.ala.eu-central-1.emqxsl.com">
+    <label for="port">Port WebSocket (TLS)</label>
+    <input id="port" inputmode="numeric" placeholder="port z przeglądu wdrożenia">
+    <label for="user">Użytkownik</label>
+    <input id="user" autocomplete="username" placeholder="web">
+    <label for="pass">Hasło</label>
+    <input id="pass" type="password" autocomplete="current-password">
+    <div class="row" style="margin-top:14px"><button class="primary" id="connect">Połącz</button></div>
+    <p class="note">Hasło nie jest zapisywane. Adres, port i login zapamiętuje tylko ta przeglądarka.</p>
+    <div id="loginmsg" class="note"></div>
+  </section>
+
+  <section class="card hidden" id="panel">
+    <div class="badges">
+      <span class="badge" id="bBroker">broker: —</span>
+      <span class="badge" id="bDevice">urządzenie: —</span>
+    </div>
+    <div class="big" id="moist">—%</div>
+    <div class="bar"><div id="moistBar"></div></div>
+    <div style="margin-top:12px">
+      <div class="kv"><span>Pompa</span><span id="pump">—</span></div>
+      <div class="kv"><span>Automatyka</span><span id="state">—</span></div>
+      <div class="kv"><span>Czujnik</span><span id="sensor">—</span></div>
+      <div class="kv"><span>Ostatni status</span><span id="age">—</span></div>
+      <div class="kv"><span>Opóźnienie (ping)</span><span id="rtt">—</span></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" id="on">Pompa ON</button>
+      <button id="off">Pompa OFF</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="status">Odśwież status</button>
+      <button id="ping">Ping</button>
+      <button id="logout">Rozłącz</button>
+    </div>
+    <div id="log" style="margin-top:12px"></div>
+    <p class="note">Pompa włączona ręcznie wyłącza się sama po 30 s. Automatyka pracuje cały czas.</p>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+const T = {
+  cmd: "nawadnianie/cmd",
+  status: "nawadnianie/status",
+  reply: "nawadnianie/reply",
+  online: "nawadnianie/online",
+};
+const $ = (id) => document.getElementById(id);
+let client = null;
+let deviceOnline = false;
+let lastStatusAt = 0;
+let pingSentAt = 0;
+
+try {
+  $("host").value = localStorage.getItem("host") || "";
+  $("port").value = localStorage.getItem("port") || "";
+  $("user").value = localStorage.getItem("user") || "web";
+} catch (e) { /* localStorage może być niedostępne */ }
+
+function setBadge(el, text, cls) {
+  el.textContent = text;
+  el.className = "badge" + (cls ? " " + cls : "");
+}
+
+function refreshButtons() {
+  const ok = client && client.connected && deviceOnline;
+  ["on", "off", "status", "ping"].forEach((id) => { $(id).disabled = !ok; });
+}
+
+function say(text) { $("log").textContent = text; }
+
+function send(cmd) {
+  if (!client || !client.connected) return;
+  client.publish(T.cmd, cmd, { qos: 1, retain: false });
+}
+
+function showStatus(s) {
+  $("moist").textContent = s.m + "%";
+  $("moistBar").style.width = Math.max(0, Math.min(100, s.m)) + "%";
+  $("pump").textContent = s.p ? "WŁĄCZONA" : "wyłączona";
+  $("state").textContent = s.s + (s.manual ? " (ręczny)" : "");
+  $("sensor").textContent = s.ok ? "OK" : "podejrzany odczyt";
+  lastStatusAt = Date.now();
+}
+
+function connect() {
+  const host = $("host").value.trim();
+  const port = $("port").value.trim();
+  const user = $("user").value.trim();
+  const pass = $("pass").value;
+  if (!host || !port || !user || !pass) { $("loginmsg").textContent = "Uzupełnij wszystkie pola."; return; }
+  try {
+    localStorage.setItem("host", host); localStorage.setItem("port", port); localStorage.setItem("user", user);
+  } catch (e) {}
+
+  $("loginmsg").textContent = "Łączenie…";
+  client = mqtt.connect("wss://" + host + ":" + port + "/mqtt", {
+    username: user,
+    password: pass,
+    clientId: "web-" + Math.random().toString(16).slice(2, 10),
+    reconnectPeriod: 3000,
+    connectTimeout: 10000,
+    clean: true,
+  });
+
+  client.on("connect", () => {
+    $("login").classList.add("hidden");
+    $("panel").classList.remove("hidden");
+    $("pass").value = "";
+    setBadge($("bBroker"), "broker: połączony", "ok");
+    client.subscribe([T.status, T.reply, T.online], { qos: 1 });
+    refreshButtons();
+  });
+  client.on("reconnect", () => setBadge($("bBroker"), "broker: łączenie…", ""));
+  client.on("close", () => { setBadge($("bBroker"), "broker: rozłączony", "bad"); refreshButtons(); });
+  client.on("error", (err) => {
+    $("loginmsg").textContent = "Błąd połączenia: " + (err && err.message ? err.message : err);
+  });
+
+  client.on("message", (topic, payload) => {
+    const text = payload.toString();
+    if (topic === T.status) {
+      try { showStatus(JSON.parse(text)); } catch (e) { say("Nieprawidłowy status: " + text); }
+    } else if (topic === T.online) {
+      deviceOnline = (text === "online");
+      setBadge($("bDevice"), "urządzenie: " + (deviceOnline ? "online" : "offline"), deviceOnline ? "ok" : "bad");
+      refreshButtons();
+    } else if (topic === T.reply) {
+      if (text === "PONG" && pingSentAt) {
+        $("rtt").textContent = Math.round(performance.now() - pingSentAt) + " ms";
+        pingSentAt = 0;
+      } else {
+        say(text);
+      }
+    }
+  });
+}
+
+$("connect").onclick = connect;
+$("on").onclick = () => send("PUMP ON");
+$("off").onclick = () => send("PUMP OFF");
+$("status").onclick = () => send("STATUS");
+$("ping").onclick = () => { pingSentAt = performance.now(); send("PING"); };
+$("logout").onclick = () => {
+  if (client) client.end(true);
+  client = null; deviceOnline = false;
+  $("panel").classList.add("hidden");
+  $("login").classList.remove("hidden");
+  $("loginmsg").textContent = "";
+};
+
+setInterval(() => {
+  if (!lastStatusAt) return;
+  const s = Math.round((Date.now() - lastStatusAt) / 1000);
+  $("age").textContent = s + " s temu";
+}, 1000);
+</script>
+</body>
+</html>
